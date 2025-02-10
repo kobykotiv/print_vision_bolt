@@ -1,0 +1,109 @@
+services:
+  # Postgres Database
+  db:
+    image: postgres:14
+    container_name: supabase-db
+    restart: always
+    ports:
+      - "5432:5432"
+    volumes:
+      - supabase_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: your_postgres_password # Change this!
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # GoTrue (Authentication)
+  gotrue:
+    image: supabase/gotrue:v2.146.0
+    container_name: supabase-gotrue
+    restart: always
+    ports:
+      - "9999:9999"
+    environment:
+      GOTRUE_API_EXTERNAL_URL: http://localhost:9999 # Or your domain
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://postgres:your_postgres_password@db:5432/postgres # Change password!
+      GOTRUE_SITE_URL: http://localhost:3000 # Your frontend URL
+      GOTRUE_JWT_SECRET: your_jwt_secret # Change this!
+      GOTRUE_DISABLE_SIGNUP: false
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Supabase Studio
+  studio:
+    image: supabase/studio:latest
+    container_name: supabase-studio
+    ports:
+      - "54323:8080"
+    environment:
+      SUPABASE_URL: http://localhost:9999 # GoTrue URL
+      SUPABASE_ANON_KEY: your_anon_key # Generate a key
+    depends_on:
+      - gotrue
+
+  # Your Next.js Application
+  app:
+    build:
+      context: .
+      target: development
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_SUPABASE_URL: http://localhost:9999 # GoTrue URL
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: your_anon_key # Use the same key as Studio
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - studio
+
+  # Redis
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  # Adminer for Database Management
+  adminer:
+    image: adminer
+    ports:
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: studio
+      ADMINER_DESIGN: dracula
+    depends_on:
+      - studio
+
+  # Redis Commander for Cache Management
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+
+volumes:
+  supabase_data:
+  redis-data:
